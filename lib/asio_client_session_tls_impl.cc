@@ -34,7 +34,7 @@ session_tls_impl::session_tls_impl(
     const std::string &host, const std::string &service,
     std::chrono::nanoseconds connect_timeout)
     : session_impl(io_context, connect_timeout), socket_(io_context, tls_ctx) {
-  socket_.set_verify_callback(boost::asio::ssl::rfc2818_verification(host));
+  socket_.set_verify_callback(boost::asio::ssl::host_name_verification(host));
   auto ssl = socket_.native_handle();
   if (!util::numeric_host(host.c_str())) {
     SSL_set_tlsext_host_name(ssl, host.c_str());

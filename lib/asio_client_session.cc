@@ -106,6 +106,10 @@ void session::on_connect(connect_cb cb) const {
 
 void session::on_error(error_cb cb) const { impl_->on_error(std::move(cb)); }
 
+void session::on_goaway(goaway_cb cb) const {
+  impl_->on_goaway(std::move(cb));
+}
+
 void session::shutdown() const { impl_->shutdown(); }
 
 boost::asio::io_context &session::io_context() const {

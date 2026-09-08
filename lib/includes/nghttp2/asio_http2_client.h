@@ -36,6 +36,10 @@ namespace asio_http2 {
 namespace client {
 
 class response_impl;
+class response;
+
+using response_cb = std::function<void(const response &)>;
+using trailers_cb = std::function<void(const header_map &)>;
 
 class response {
 public:
@@ -47,6 +51,12 @@ public:
   // received.
   void on_data(data_cb cb) const;
 
+  // Sets callback which is invoked when response trailer fields are
+  // received.  Called after on_response and body EOF (on_data with len
+  // 0) when trailers are present.  For trailers-only responses, invoked
+  // with the sole response header block immediately after on_response.
+  void on_trailers(trailers_cb cb) const;
+
   // Returns status code.
   int status_code() const;
 
@@ -57,6 +67,9 @@ public:
   // which start with colon (:), are excluded from this list.
   const header_map &header() const;
 
+  // Returns the response trailer fields.
+  const header_map &trailer() const;
+
   // Application must not call this directly.
   response_impl &impl() const;
 
@@ -66,11 +79,12 @@ private:
 
 class request;
 
-using response_cb = std::function<void(const response &)>;
 using request_cb = std::function<void(const request &)>;
 // Called when connection is established; receives the connected endpoint.
 using connect_cb =
     std::function<void(boost::asio::ip::tcp::endpoint)>;
+using goaway_cb =
+    std::function<void(uint32_t error_code, int32_t last_stream_id)>;
 
 class request_impl;
 
@@ -103,6 +117,9 @@ public:
 
   // Resumes deferred uploading.
   void resume() const;
+
+  // Returns the HTTP/2 stream identifier assigned to this request.
+  int32_t stream_id() const;
 
   // Returns method (e.g., GET).
   const std::string &method() const;
@@ -196,6 +213,9 @@ public:
   // Sets callback which is invoked there is connection level error
   // and session is terminated.
   void on_error(error_cb cb) const;
+
+  // Sets callback which is invoked when a GOAWAY frame is received.
+  void on_goaway(goaway_cb cb) const;
 
   // Sets read timeout, which defaults to 60 seconds.
   // Accepts any std::chrono duration (e.g., std::chrono::seconds(30)).

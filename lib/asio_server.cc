@@ -47,9 +47,46 @@ namespace server {
 server::server(std::size_t io_context_pool_size,
                std::chrono::nanoseconds tls_handshake_timeout,
                std::chrono::nanoseconds read_timeout)
-    : io_context_pool_(io_context_pool_size),
+    : uses_external_io_context_(false),
+      io_context_pool_(std::make_unique<io_service_pool>(io_context_pool_size)),
+      external_io_context_(nullptr),
       tls_handshake_timeout_(tls_handshake_timeout),
       read_timeout_(read_timeout) {}
+
+server::server(boost::asio::io_context &io_context,
+               std::chrono::nanoseconds tls_handshake_timeout,
+               std::chrono::nanoseconds read_timeout)
+    : uses_external_io_context_(true),
+      io_context_pool_(nullptr),
+      external_io_context_(&io_context),
+      tls_handshake_timeout_(tls_handshake_timeout),
+      read_timeout_(read_timeout) {
+  external_io_contexts_.push_back(
+      std::shared_ptr<boost::asio::io_context>(&io_context, [](auto *) {}));
+}
+
+boost::asio::io_context &server::get_io_context() {
+  if (uses_external_io_context_) {
+    return *external_io_context_;
+  }
+  return io_context_pool_->get_io_context();
+}
+
+void server::track_connection(std::function<void()> stop_fn) {
+  std::lock_guard<std::mutex> lock(connection_closers_mutex_);
+  connection_closers_.push_back(std::move(stop_fn));
+}
+
+void server::close_connections() {
+  std::vector<std::function<void()>> closers;
+  {
+    std::lock_guard<std::mutex> lock(connection_closers_mutex_);
+    closers.swap(connection_closers_);
+  }
+  for (auto &fn : closers) {
+    fn();
+  }
+}
 
 boost::system::error_code
 server::listen_and_serve(boost::system::error_code &ec,
@@ -70,7 +107,13 @@ server::listen_and_serve(boost::system::error_code &ec,
     }
   }
 
-  io_context_pool_.run(asynchronous);
+  if (uses_external_io_context_) {
+    if (!asynchronous) {
+      external_io_context_->run();
+    }
+  } else {
+    io_context_pool_->run(asynchronous);
+  }
 
   return ec;
 }
@@ -79,7 +122,7 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
                                                   const std::string &address,
                                                   const std::string &port,
                                                   int backlog) {
-  tcp::resolver resolver(io_context_pool_.get_io_context());
+  tcp::resolver resolver(get_io_context());
   auto results = resolver.resolve(address, port, ec);
   if (ec) {
     return ec;
@@ -87,7 +130,7 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
 
   for (const auto &result : results) {
     tcp::endpoint endpoint = result.endpoint();
-    auto acceptor = tcp::acceptor(io_context_pool_.get_io_context());
+    auto acceptor = tcp::acceptor(get_io_context());
 
     if (acceptor.open(endpoint.protocol(), ec)) {
       continue;
@@ -100,7 +143,8 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
     }
 
     if (acceptor.listen(
-            backlog == -1 ? boost::asio::socket_base::max_connections : backlog,
+            backlog == -1 ? boost::asio::socket_base::max_listen_connections
+                          : backlog,
             ec)) {
       continue;
     }
@@ -127,8 +171,14 @@ void server::start_accept(boost::asio::ssl::context &tls_context,
   }
 
   auto new_connection = std::make_shared<connection<ssl_socket>>(
-      mux, tls_handshake_timeout_, read_timeout_,
-      io_context_pool_.get_io_context(), tls_context);
+      mux, tls_handshake_timeout_, read_timeout_, get_io_context(),
+      tls_context);
+
+  track_connection([w = std::weak_ptr<connection<ssl_socket>>(new_connection)]() {
+    if (auto c = w.lock()) {
+      c->stop();
+    }
+  });
 
   acceptor.async_accept(
       new_connection->socket().lowest_layer(),
@@ -166,8 +216,13 @@ void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
   }
 
   auto new_connection = std::make_shared<connection<tcp::socket>>(
-      mux, tls_handshake_timeout_, read_timeout_,
-      io_context_pool_.get_io_context());
+      mux, tls_handshake_timeout_, read_timeout_, get_io_context());
+
+  track_connection([w = std::weak_ptr<connection<tcp::socket>>(new_connection)]() {
+    if (auto c = w.lock()) {
+      c->stop();
+    }
+  });
 
   acceptor.async_accept(
       new_connection->socket(), [this, &acceptor, &mux, new_connection](
@@ -187,14 +242,25 @@ void server::stop() {
   for (auto &acceptor : acceptors_) {
     acceptor.close();
   }
-  io_context_pool_.stop();
+  close_connections();
+  if (!uses_external_io_context_) {
+    io_context_pool_->stop();
+  }
 }
 
-void server::join() { io_context_pool_.join(); }
+void server::join() {
+  if (uses_external_io_context_) {
+    return;
+  }
+  io_context_pool_->join();
+}
 
 const std::vector<std::shared_ptr<boost::asio::io_context>> &
 server::io_contexts() const {
-  return io_context_pool_.io_contexts();
+  if (uses_external_io_context_) {
+    return external_io_contexts_;
+  }
+  return io_context_pool_->io_contexts();
 }
 
 const std::vector<int> server::ports() const {

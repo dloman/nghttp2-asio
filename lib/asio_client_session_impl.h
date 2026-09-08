@@ -55,9 +55,12 @@ public:
 
   void on_connect(connect_cb cb);
   void on_error(error_cb cb);
+  void on_goaway(goaway_cb cb);
 
   const connect_cb &on_connect() const;
   const error_cb &on_error() const;
+  const goaway_cb &on_goaway() const;
+  void call_on_goaway(uint32_t error_code, int32_t last_stream_id);
 
   int write_trailer(stream &strm, header_map h);
 
@@ -120,6 +123,7 @@ private:
 
   connect_cb connect_cb_;
   error_cb error_cb_;
+  goaway_cb goaway_cb_;
 
   boost::asio::steady_timer deadline_;
   std::chrono::nanoseconds connect_timeout_;

@@ -135,6 +135,7 @@ class http2_impl;
 class http2 {
 public:
   http2();
+  explicit http2(boost::asio::io_context &io_context);
   ~http2();
 
   http2(http2 &&other) noexcept;

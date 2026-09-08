@@ -44,6 +44,7 @@ class server;
 class http2_impl {
 public:
   http2_impl();
+  explicit http2_impl(boost::asio::io_context &io_context);
   boost::system::error_code listen_and_serve(
       boost::system::error_code &ec, boost::asio::ssl::context *tls_context,
       const std::string &address, const std::string &port, bool asynchronous);
@@ -60,6 +61,7 @@ public:
 
 private:
   std::unique_ptr<server> server_;
+  boost::asio::io_context *external_io_context_;
   std::size_t num_threads_;
   int backlog_;
   serve_mux mux_;

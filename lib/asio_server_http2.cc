@@ -38,6 +38,9 @@ namespace server {
 
 http2::http2() : impl_(std::make_unique<http2_impl>()) {}
 
+http2::http2(boost::asio::io_context &io_context)
+    : impl_(std::make_unique<http2_impl>(io_context)) {}
+
 http2::~http2() {}
 
 http2::http2(http2 &&other) noexcept : impl_(std::move(other.impl_)) {}

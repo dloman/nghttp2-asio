@@ -149,9 +149,24 @@ void session_impl::on_connect(connect_cb cb) { connect_cb_ = std::move(cb); }
 
 void session_impl::on_error(error_cb cb) { error_cb_ = std::move(cb); }
 
+void session_impl::on_goaway(goaway_cb cb) { goaway_cb_ = std::move(cb); }
+
 const connect_cb &session_impl::on_connect() const { return connect_cb_; }
 
 const error_cb &session_impl::on_error() const { return error_cb_; }
+
+const goaway_cb &session_impl::on_goaway() const { return goaway_cb_; }
+
+void session_impl::call_on_goaway(uint32_t error_code,
+                                  int32_t last_stream_id) {
+  if (stopped_) {
+    return;
+  }
+  if (!goaway_cb_) {
+    return;
+  }
+  goaway_cb_(error_code, last_stream_id);
+}
 
 void session_impl::call_error_cb(const boost::system::error_code &ec) {
   if (stopped_) {
@@ -193,9 +208,26 @@ int on_header_callback(nghttp2_session *session, const nghttp2_frame *frame,
       return 0;
     }
 
-    // ignore trailers
-    if (frame->headers.cat == NGHTTP2_HCAT_HEADERS &&
-        !strm->expect_final_response()) {
+    if (frame->headers.cat == NGHTTP2_HCAT_HEADERS) {
+      if (strm->expect_final_response()) {
+        return 0;
+      }
+
+      if (strm->response().impl().trailer_buffer_size() + namelen + valuelen >
+          64_k) {
+        nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE,
+                                  frame->hd.stream_id, NGHTTP2_INTERNAL_ERROR);
+        break;
+      }
+      strm->response().impl().update_trailer_buffer_size(namelen + valuelen);
+      strm->response().impl().trailer().emplace(
+          std::string(name, name + namelen),
+          header_value{std::string(value, value + valuelen),
+                       (flags & NGHTTP2_NV_FLAG_NO_INDEX) != 0});
+      break;
+    }
+
+    if (strm->expect_final_response()) {
       return 0;
     }
 
@@ -286,7 +318,7 @@ int on_frame_recv_callback(nghttp2_session *session, const nghttp2_frame *frame,
       return 0;
     }
     if (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) {
-      strm->response().impl().call_on_data(nullptr, 0);
+      strm->response().impl().deliver_body_eof();
     }
     break;
   }
@@ -295,10 +327,14 @@ int on_frame_recv_callback(nghttp2_session *session, const nghttp2_frame *frame,
       return 0;
     }
 
-    // ignore trailers
-    if (frame->headers.cat == NGHTTP2_HCAT_HEADERS &&
-        !strm->expect_final_response()) {
-      return 0;
+    if (frame->headers.cat == NGHTTP2_HCAT_HEADERS) {
+      if (strm->expect_final_response()) {
+        return 0;
+      }
+      auto &res = strm->response().impl();
+      res.deliver_body_eof();
+      res.call_on_trailers(res.trailer());
+      break;
     }
 
     if (strm->expect_final_response()) {
@@ -309,7 +345,9 @@ int on_frame_recv_callback(nghttp2_session *session, const nghttp2_frame *frame,
     auto &req = strm->request().impl();
     req.call_on_response(strm->response());
     if (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) {
-      strm->response().impl().call_on_data(nullptr, 0);
+      auto &res = strm->response().impl();
+      res.call_on_trailers(res.header());
+      res.deliver_body_eof();
     }
     break;
   }
@@ -325,6 +363,11 @@ int on_frame_recv_callback(nghttp2_session *session, const nghttp2_frame *frame,
 
     strm->request().impl().call_on_push(push_strm->request());
 
+    break;
+  }
+  case NGHTTP2_GOAWAY: {
+    sess->call_on_goaway(frame->goaway.error_code,
+                         frame->goaway.last_stream_id);
     break;
   }
   }
