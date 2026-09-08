@@ -25,6 +25,8 @@
 #ifndef ASIO_HTTP2_SERVER_H
 #define ASIO_HTTP2_SERVER_H
 
+#include <chrono>
+
 #include <nghttp2/asio_http2.h>
 
 namespace nghttp2 {
@@ -112,8 +114,8 @@ public:
   // Returns status code.
   unsigned int status_code() const;
 
-  // Returns boost::asio::io_service this response is running on.
-  boost::asio::io_service &io_service() const;
+  // Returns the io_context this response is running on.
+  boost::asio::io_context &io_context() const;
 
   // Application must not call this directly.
   response_impl &impl() const;
@@ -162,32 +164,7 @@ public:
   // Registers request handler |cb| with path pattern |pattern|.  This
   // function will fail and returns false if same pattern has been
   // already registered or |pattern| is empty string.  Otherwise
-  // returns true.  The pattern match rule is the same as
-  // net/http/ServeMux in golang.  Quoted from golang manual
-  // (http://golang.org/pkg/net/http/#ServeMux):
-  //
-  //   Patterns name fixed, rooted paths, like "/favicon.ico", or
-  //   rooted subtrees, like "/images/" (note the trailing
-  //   slash). Longer patterns take precedence over shorter ones, so
-  //   that if there are handlers registered for both "/images/" and
-  //   "/images/thumbnails/", the latter handler will be called for
-  //   paths beginning "/images/thumbnails/" and the former will
-  //   receive requests for any other paths in the "/images/" subtree.
-  //
-  //   Note that since a pattern ending in a slash names a rooted
-  //   subtree, the pattern "/" matches all paths not matched by other
-  //   registered patterns, not just the URL with Path == "/".
-  //
-  //   Patterns may optionally begin with a host name, restricting
-  //   matches to URLs on that host only. Host-specific patterns take
-  //   precedence over general patterns, so that a handler might
-  //   register for the two patterns "/codesearch" and
-  //   "codesearch.google.com/" without also taking over requests for
-  //   "http://www.google.com/".
-  //
-  // Just like ServeMux in golang, URL request path is sanitized and
-  // if they contains . or .. elements, they are redirected to an
-  // equivalent .- and ..-free URL.
+  // returns true.
   bool handle(std::string pattern, request_cb cb);
 
   // Sets number of native threads to handle incoming HTTP request.
@@ -199,10 +176,12 @@ public:
   void backlog(int backlog);
 
   // Sets TLS handshake timeout, which defaults to 60 seconds.
-  void tls_handshake_timeout(const boost::posix_time::time_duration &t);
+  // Accepts any std::chrono duration (e.g., std::chrono::seconds(30)).
+  void tls_handshake_timeout(std::chrono::nanoseconds t);
 
   // Sets read timeout, which defaults to 60 seconds.
-  void read_timeout(const boost::posix_time::time_duration &t);
+  // Accepts any std::chrono duration (e.g., std::chrono::seconds(30)).
+  void read_timeout(std::chrono::nanoseconds t);
 
   // Gracefully stop http2 server
   void stop();
@@ -210,9 +189,9 @@ public:
   // Join on http2 server and wait for it to fully stop
   void join();
 
-  // Get access to the io_service objects.
-  const std::vector<std::shared_ptr<boost::asio::io_service>> &
-  io_services() const;
+  // Get access to the io_context objects.
+  const std::vector<std::shared_ptr<boost::asio::io_context>> &
+  io_contexts() const;
 
   // Returns a vector with the ports in use
   std::vector<int> ports() const;

@@ -27,7 +27,8 @@
 
 #include "nghttp2_config.h"
 
-#include <boost/array.hpp>
+#include <array>
+#include <chrono>
 
 #include <nghttp2/asio_http2_client.h>
 
@@ -43,13 +44,13 @@ using boost::asio::ip::tcp;
 
 class session_impl : public std::enable_shared_from_this<session_impl> {
 public:
-  session_impl(boost::asio::io_service &io_service,
-               const boost::posix_time::time_duration &connect_timeout);
+  session_impl(boost::asio::io_context &io_context,
+               std::chrono::nanoseconds connect_timeout);
   virtual ~session_impl();
 
   void start_resolve(const std::string &host, const std::string &service);
 
-  void connected(tcp::resolver::iterator endpoint_it);
+  void connected(tcp::endpoint endpoint);
   void not_connected(const boost::system::error_code &ec);
 
   void on_connect(connect_cb cb);
@@ -72,7 +73,7 @@ public:
                         const std::string &method, const std::string &uri,
                         generator_cb cb, header_map h, priority_spec spec);
 
-  virtual void start_connect(tcp::resolver::iterator endpoint_it) = 0;
+  virtual void start_connect(tcp::resolver::results_type results) = 0;
   virtual tcp::socket &socket() = 0;
   virtual void read_socket(
       std::function<void(const boost::system::error_code &ec, std::size_t n)>
@@ -84,7 +85,7 @@ public:
 
   void shutdown();
 
-  boost::asio::io_service &io_service();
+  boost::asio::io_context &io_context();
 
   void signal_write();
 
@@ -94,14 +95,14 @@ public:
   void do_read();
   void do_write();
 
-  void read_timeout(const boost::posix_time::time_duration &t);
+  void read_timeout(std::chrono::nanoseconds t);
 
   void stop();
   bool stopped() const;
 
 protected:
-  boost::array<uint8_t, 8_k> rb_;
-  boost::array<uint8_t, 64_k> wb_;
+  std::array<uint8_t, 8_k> rb_;
+  std::array<uint8_t, 64_k> wb_;
   std::size_t wblen_;
 
 private:
@@ -112,7 +113,7 @@ private:
   void start_ping();
   void handle_ping(const boost::system::error_code &ec);
 
-  boost::asio::io_service &io_service_;
+  boost::asio::io_context &io_context_;
   tcp::resolver resolver_;
 
   std::map<int32_t, std::unique_ptr<stream>> streams_;
@@ -120,11 +121,11 @@ private:
   connect_cb connect_cb_;
   error_cb error_cb_;
 
-  boost::asio::deadline_timer deadline_;
-  boost::posix_time::time_duration connect_timeout_;
-  boost::posix_time::time_duration read_timeout_;
+  boost::asio::steady_timer deadline_;
+  std::chrono::nanoseconds connect_timeout_;
+  std::chrono::nanoseconds read_timeout_;
 
-  boost::asio::deadline_timer ping_;
+  boost::asio::steady_timer ping_;
 
   nghttp2_session *session_;
 
