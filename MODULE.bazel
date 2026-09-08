@@ -1,6 +1,6 @@
 module(
     name = "nghttp2-asio",
-    version = "0.0.90-rpcpio",
+    version = "0.0.91",
     bazel_compatibility = [">=7.6.0"],
 )
 
