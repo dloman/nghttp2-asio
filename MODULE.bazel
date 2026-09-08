@@ -1,7 +1,7 @@
 module(
     name = "nghttp2-asio",
     version = "0.0.91",
-    bazel_compatibility = [">=7.6.0"],
+    bazel_compatibility = [">=8.7.0"],
 )
 
 bazel_dep(name = "boost.asio", version = "1.90.0.bcr.1")
