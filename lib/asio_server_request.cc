@@ -54,6 +54,10 @@ const boost::asio::ip::tcp::endpoint &request::remote_endpoint() const {
   return impl_->remote_endpoint();
 }
 
+X509 *request::tls_peer_certificate() const {
+  return impl_->tls_peer_certificate();
+}
+
 } // namespace server
 } // namespace asio_http2
 } // namespace nghttp2

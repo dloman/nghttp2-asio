@@ -64,6 +64,12 @@ public:
   // Returns the remote endpoint of the request
   const boost::asio::ip::tcp::endpoint &remote_endpoint() const;
 
+  // Returns the client certificate of this request's connection, or nullptr
+  // for cleartext connections and for TLS clients that sent no certificate
+  // or one that failed verification.  The connection owns the certificate;
+  // it is valid while the request is.  X509_up_ref it to keep it longer.
+  X509 *tls_peer_certificate() const;
+
 private:
   std::unique_ptr<request_impl> impl_;
 };

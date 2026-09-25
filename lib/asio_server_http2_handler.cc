@@ -145,6 +145,7 @@ int on_frame_recv_callback(nghttp2_session *session, const nghttp2_frame *frame,
 
     auto &req = strm->request().impl();
     req.remote_endpoint(handler->remote_endpoint());
+    req.tls_peer_certificate(handler->peer_certificate());
 
     handler->call_on_request(*strm);
 
@@ -241,6 +242,7 @@ http2_handler::http2_handler(const boost::asio::any_io_executor &executor,
       mux_(mux),
       executor_(executor),
       remote_ep_(ep),
+      peer_cert_(nullptr),
       session_(nullptr),
       buf_(nullptr),
       buflen_(0),
@@ -256,6 +258,7 @@ http2_handler::~http2_handler() {
   }
 
   nghttp2_session_del(session_);
+  X509_free(peer_cert_);
 }
 
 const std::string &http2_handler::http_date() {
@@ -485,6 +488,13 @@ boost::asio::io_context &http2_handler::io_context() {
 const boost::asio::ip::tcp::endpoint &http2_handler::remote_endpoint() {
   return remote_ep_;
 }
+
+void http2_handler::peer_certificate(X509 *cert) {
+  X509_free(peer_cert_);
+  peer_cert_ = cert;
+}
+
+X509 *http2_handler::peer_certificate() const { return peer_cert_; }
 
 callback_guard::callback_guard(http2_handler &h) : handler(h) {
   handler.enter_callback();

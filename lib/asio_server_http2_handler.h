@@ -98,6 +98,10 @@ public:
 
   const boost::asio::ip::tcp::endpoint &remote_endpoint();
 
+  // Takes ownership of one reference to |cert|, which may be nullptr.
+  void peer_certificate(X509 *cert);
+  X509 *peer_certificate() const;
+
   const std::string &http_date();
 
   template <size_t N>
@@ -162,6 +166,7 @@ private:
   serve_mux &mux_;
   boost::asio::any_io_executor executor_;
   boost::asio::ip::tcp::endpoint remote_ep_;
+  X509 *peer_cert_;
   nghttp2_session *session_;
   const uint8_t *buf_;
   std::size_t buflen_;

@@ -52,7 +52,9 @@ void test_external_io_context_lifecycle() {
 
   std::atomic<bool> request_served{false};
 
-  CHECK(server.handle("/", [&](const server::request &, const server::response &res) {
+  CHECK(server.handle("/", [&](const server::request &req,
+                               const server::response &res) {
+    CHECK(req.tls_peer_certificate() == nullptr);
     request_served = true;
     res.write_head(200);
     res.end("ok");

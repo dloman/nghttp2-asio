@@ -56,6 +56,25 @@ namespace asio_http2 {
 
 namespace server {
 
+// Returns a new reference to the peer certificate of a completed TLS
+// handshake, or nullptr if the peer sent none or it failed verification.
+inline X509 *verified_peer_certificate(boost::asio::ip::tcp::socket &) {
+  return nullptr;
+}
+
+inline X509 *verified_peer_certificate(
+    boost::asio::ssl::stream<boost::asio::ip::tcp::socket> &socket) {
+  SSL *ssl = socket.native_handle();
+  if (SSL_get_verify_result(ssl) != X509_V_OK) {
+    return nullptr;
+  }
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(OPENSSL_IS_BORINGSSL)
+  return SSL_get1_peer_certificate(ssl);
+#else
+  return SSL_get_peer_certificate(ssl);
+#endif
+}
+
 template <typename socket_type>
 class connection : public std::enable_shared_from_this<connection<socket_type>> {
 public:
@@ -82,6 +101,7 @@ public:
         socket_.lowest_layer().get_executor(),
         socket_.lowest_layer().remote_endpoint(ec),
         [this]() { do_write(); }, mux_);
+    handler_->peer_certificate(verified_peer_certificate(socket_));
     if (handler_->start() != 0) {
       stop();
       return;
