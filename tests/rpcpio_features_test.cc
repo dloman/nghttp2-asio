@@ -46,6 +46,14 @@ std::string request_uri(int port, const std::string &path) {
   return "http://127.0.0.1:" + std::to_string(port) + path;
 }
 
+void test_shutdown_before_connect() {
+  boost::asio::io_context io_context;
+  client::session sess(io_context, "127.0.0.1", "1");
+
+  sess.shutdown();
+  io_context.run();
+}
+
 void test_external_io_context_lifecycle() {
   boost::asio::io_context io_context;
   server::http2 server(io_context);
@@ -302,6 +310,7 @@ void test_on_goaway() {
 } // namespace
 
 int main() {
+  test_shutdown_before_connect();
   test_external_io_context_lifecycle();
   test_response_trailers_and_ordering();
   test_on_goaway();
