@@ -193,7 +193,10 @@ public:
   // Accepts any std::chrono duration (e.g., std::chrono::seconds(30)).
   void read_timeout(std::chrono::nanoseconds t);
 
-  // Gracefully stop http2 server
+  // Stop accepting new connections. Existing connections remain open.
+  void stop_listening();
+
+  // Stop accepting and close existing connections.
   void stop();
 
   // Join on http2 server and wait for it to fully stop

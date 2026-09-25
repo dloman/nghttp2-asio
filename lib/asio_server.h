@@ -81,6 +81,7 @@ public:
                    const std::string &address, const std::string &port,
                    int backlog, serve_mux &mux, bool asynchronous = false);
   void join();
+  void stop_listening();
   void stop();
 
   const std::vector<std::shared_ptr<boost::asio::io_context>> &

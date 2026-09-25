@@ -53,6 +53,7 @@ public:
   void tls_handshake_timeout(std::chrono::nanoseconds t);
   void read_timeout(std::chrono::nanoseconds t);
   bool handle(std::string pattern, request_cb cb);
+  void stop_listening();
   void stop();
   void join();
   const std::vector<std::shared_ptr<boost::asio::io_context>> &

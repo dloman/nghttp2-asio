@@ -81,6 +81,8 @@ bool http2_impl::handle(std::string pattern, request_cb cb) {
   return mux_.handle(std::move(pattern), std::move(cb));
 }
 
+void http2_impl::stop_listening() { server_->stop_listening(); }
+
 void http2_impl::stop() { return server_->stop(); }
 
 void http2_impl::join() { return server_->join(); }

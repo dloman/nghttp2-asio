@@ -279,10 +279,14 @@ void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
           }));
 }
 
-void server::stop() {
+void server::stop_listening() {
   for (auto &acceptor : acceptors_) {
     acceptor.close();
   }
+}
+
+void server::stop() {
+  stop_listening();
   close_connections();
   if (!uses_external_io_context_) {
     io_context_pool_->stop();

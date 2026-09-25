@@ -84,6 +84,8 @@ bool http2::handle(std::string pattern, request_cb cb) {
   return impl_->handle(std::move(pattern), std::move(cb));
 }
 
+void http2::stop_listening() { impl_->stop_listening(); }
+
 void http2::stop() { impl_->stop(); }
 
 void http2::join() { return impl_->join(); }
