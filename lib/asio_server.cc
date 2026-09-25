@@ -214,8 +214,16 @@ void server::start_accept(boost::asio::ssl::context &tls_context,
           [this, &tls_context, &acceptor, &mux,
            new_connection](const boost::system::error_code &e) {
             if (!e) {
+              boost::system::error_code option_ec;
               new_connection->socket().lowest_layer().set_option(
-                  tcp::no_delay(true));
+                  tcp::no_delay(true), option_ec);
+              if (option_ec) {
+                new_connection->stop();
+                if (acceptor.is_open()) {
+                  start_accept(tls_context, acceptor, mux);
+                }
+                return;
+              }
               new_connection->start_tls_handshake_deadline();
               new_connection->socket().async_handshake(
                   boost::asio::ssl::stream_base::server,
@@ -269,7 +277,16 @@ void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
           [this, &acceptor, &mux,
            new_connection](const boost::system::error_code &e) {
             if (!e) {
-              new_connection->socket().set_option(tcp::no_delay(true));
+              boost::system::error_code option_ec;
+              new_connection->socket().set_option(tcp::no_delay(true),
+                                                  option_ec);
+              if (option_ec) {
+                new_connection->stop();
+                if (acceptor.is_open()) {
+                  start_accept(acceptor, mux);
+                }
+                return;
+              }
               new_connection->start_read_deadline();
               new_connection->start();
             }
