@@ -58,6 +58,8 @@ public:
   const boost::asio::ip::tcp::endpoint &remote_endpoint() const;
   void remote_endpoint(boost::asio::ip::tcp::endpoint ep);
 
+  boost::asio::any_io_executor get_executor() const;
+
   X509 *tls_peer_certificate() const;
   void tls_peer_certificate(X509 *cert);
 

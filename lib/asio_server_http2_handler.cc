@@ -485,6 +485,10 @@ boost::asio::io_context &http2_handler::io_context() {
   return static_cast<boost::asio::io_context &>(executor_.context());
 }
 
+const boost::asio::any_io_executor &http2_handler::get_executor() const {
+  return executor_;
+}
+
 const boost::asio::ip::tcp::endpoint &http2_handler::remote_endpoint() {
   return remote_ep_;
 }

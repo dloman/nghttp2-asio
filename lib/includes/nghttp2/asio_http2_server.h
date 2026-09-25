@@ -64,6 +64,9 @@ public:
   // Returns the remote endpoint of the request
   const boost::asio::ip::tcp::endpoint &remote_endpoint() const;
 
+  // Returns the executor that serializes this connection's operations.
+  boost::asio::any_io_executor get_executor() const;
+
   // Returns the client certificate of this request's connection, or nullptr
   // for cleartext connections and for TLS clients that sent no certificate
   // or one that failed verification.  The connection owns the certificate;
