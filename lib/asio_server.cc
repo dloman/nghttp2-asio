@@ -198,33 +198,44 @@ void server::start_accept(boost::asio::ssl::context &tls_context,
     });
   });
 
+  // async_accept's completion handler is, by default, dispatched via the
+  // acceptor's own executor -- not conn_strand, even though the socket it
+  // operates on was constructed with conn_strand -- because it is the
+  // acceptor's operation, and there is exactly one acceptor shared by every
+  // connection. Touching the brand-new connection (set_option, starting the
+  // handshake) from there is exactly the kind of access this whole change
+  // is meant to confine, so bind_executor it onto conn_strand explicitly.
+  // The trailing start_accept() re-arm call is unrelated to this
+  // connection but harmless to also run on conn_strand once.
   acceptor.async_accept(
       new_connection->socket().lowest_layer(),
-      [this, &tls_context, &acceptor, &mux,
-       new_connection](const boost::system::error_code &e) {
-        if (!e) {
-          new_connection->socket().lowest_layer().set_option(
-              tcp::no_delay(true));
-          new_connection->start_tls_handshake_deadline();
-          new_connection->socket().async_handshake(
-              boost::asio::ssl::stream_base::server,
-              [new_connection](const boost::system::error_code &e) {
-                if (e) {
-                  new_connection->stop();
-                  return;
-                }
+      boost::asio::bind_executor(
+          conn_strand,
+          [this, &tls_context, &acceptor, &mux,
+           new_connection](const boost::system::error_code &e) {
+            if (!e) {
+              new_connection->socket().lowest_layer().set_option(
+                  tcp::no_delay(true));
+              new_connection->start_tls_handshake_deadline();
+              new_connection->socket().async_handshake(
+                  boost::asio::ssl::stream_base::server,
+                  [new_connection](const boost::system::error_code &e) {
+                    if (e) {
+                      new_connection->stop();
+                      return;
+                    }
 
-                if (!tls_h2_negotiated(new_connection->socket())) {
-                  new_connection->stop();
-                  return;
-                }
+                    if (!tls_h2_negotiated(new_connection->socket())) {
+                      new_connection->stop();
+                      return;
+                    }
 
-                new_connection->start();
-              });
-        }
+                    new_connection->start();
+                  });
+            }
 
-        start_accept(tls_context, acceptor, mux);
-      });
+            start_accept(tls_context, acceptor, mux);
+          }));
 }
 
 void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
@@ -250,18 +261,22 @@ void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
     });
   });
 
+  // See the TLS overload above for why this binds conn_strand explicitly.
   acceptor.async_accept(
-      new_connection->socket(), [this, &acceptor, &mux, new_connection](
-                                    const boost::system::error_code &e) {
-        if (!e) {
-          new_connection->socket().set_option(tcp::no_delay(true));
-          new_connection->start_read_deadline();
-          new_connection->start();
-        }
-        if (acceptor.is_open()) {
-          start_accept(acceptor, mux);
-        }
-      });
+      new_connection->socket(),
+      boost::asio::bind_executor(
+          conn_strand,
+          [this, &acceptor, &mux,
+           new_connection](const boost::system::error_code &e) {
+            if (!e) {
+              new_connection->socket().set_option(tcp::no_delay(true));
+              new_connection->start_read_deadline();
+              new_connection->start();
+            }
+            if (acceptor.is_open()) {
+              start_accept(acceptor, mux);
+            }
+          }));
 }
 
 void server::stop() {
