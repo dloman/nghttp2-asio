@@ -37,53 +37,88 @@ namespace client {
 
 using boost::asio::ip::tcp;
 
+// The io_context-based constructors are convenience wrappers around the
+// executor-based ones below; see the header comment for why the executor
+// ones are what actually matter for thread-safety.
 session::session(boost::asio::io_context &io_context, const std::string &host,
                  const std::string &service)
-    : impl_(std::make_shared<session_tcp_impl>(
-          io_context, host, service, std::chrono::seconds(60))) {
-  impl_->start_resolve(host, service);
-}
+    : session(io_context.get_executor(), host, service) {}
 
 session::session(boost::asio::io_context &io_context,
                  const boost::asio::ip::tcp::endpoint &local_endpoint,
                  const std::string &host, const std::string &service)
-    : impl_(std::make_shared<session_tcp_impl>(
-          io_context, local_endpoint, host, service,
-          std::chrono::seconds(60))) {
-  impl_->start_resolve(host, service);
-}
+    : session(io_context.get_executor(), local_endpoint, host, service) {}
 
 session::session(boost::asio::io_context &io_context, const std::string &host,
                  const std::string &service,
                  std::chrono::nanoseconds connect_timeout)
-    : impl_(std::make_shared<session_tcp_impl>(io_context, host, service,
-                                               connect_timeout)) {
-  impl_->start_resolve(host, service);
-}
+    : session(io_context.get_executor(), host, service, connect_timeout) {}
 
 session::session(boost::asio::io_context &io_context,
                  const boost::asio::ip::tcp::endpoint &local_endpoint,
                  const std::string &host, const std::string &service,
                  std::chrono::nanoseconds connect_timeout)
-    : impl_(std::make_shared<session_tcp_impl>(io_context, local_endpoint, host,
-                                               service, connect_timeout)) {
-  impl_->start_resolve(host, service);
-}
+    : session(io_context.get_executor(), local_endpoint, host, service,
+              connect_timeout) {}
 
 session::session(boost::asio::io_context &io_context,
                  boost::asio::ssl::context &tls_ctx, const std::string &host,
                  const std::string &service)
-    : impl_(std::make_shared<session_tls_impl>(
-          io_context, tls_ctx, host, service, std::chrono::seconds(60))) {
-  impl_->start_resolve(host, service);
-}
+    : session(io_context.get_executor(), tls_ctx, host, service) {}
 
 session::session(boost::asio::io_context &io_context,
                  boost::asio::ssl::context &tls_ctx, const std::string &host,
                  const std::string &service,
                  std::chrono::nanoseconds connect_timeout)
-    : impl_(std::make_shared<session_tls_impl>(io_context, tls_ctx, host,
+    : session(io_context.get_executor(), tls_ctx, host, service,
+              connect_timeout) {}
+
+session::session(const boost::asio::any_io_executor &ex,
+                 const std::string &host, const std::string &service)
+    : impl_(std::make_shared<session_tcp_impl>(
+          ex, host, service, std::chrono::seconds(60))) {
+  impl_->start_resolve(host, service);
+}
+
+session::session(const boost::asio::any_io_executor &ex,
+                 const boost::asio::ip::tcp::endpoint &local_endpoint,
+                 const std::string &host, const std::string &service)
+    : impl_(std::make_shared<session_tcp_impl>(
+          ex, local_endpoint, host, service, std::chrono::seconds(60))) {
+  impl_->start_resolve(host, service);
+}
+
+session::session(const boost::asio::any_io_executor &ex,
+                 const std::string &host, const std::string &service,
+                 std::chrono::nanoseconds connect_timeout)
+    : impl_(std::make_shared<session_tcp_impl>(ex, host, service,
+                                               connect_timeout)) {
+  impl_->start_resolve(host, service);
+}
+
+session::session(const boost::asio::any_io_executor &ex,
+                 const boost::asio::ip::tcp::endpoint &local_endpoint,
+                 const std::string &host, const std::string &service,
+                 std::chrono::nanoseconds connect_timeout)
+    : impl_(std::make_shared<session_tcp_impl>(ex, local_endpoint, host,
                                                service, connect_timeout)) {
+  impl_->start_resolve(host, service);
+}
+
+session::session(const boost::asio::any_io_executor &ex,
+                 boost::asio::ssl::context &tls_ctx, const std::string &host,
+                 const std::string &service)
+    : impl_(std::make_shared<session_tls_impl>(
+          ex, tls_ctx, host, service, std::chrono::seconds(60))) {
+  impl_->start_resolve(host, service);
+}
+
+session::session(const boost::asio::any_io_executor &ex,
+                 boost::asio::ssl::context &tls_ctx, const std::string &host,
+                 const std::string &service,
+                 std::chrono::nanoseconds connect_timeout)
+    : impl_(std::make_shared<session_tls_impl>(ex, tls_ctx, host, service,
+                                               connect_timeout)) {
   impl_->start_resolve(host, service);
 }
 

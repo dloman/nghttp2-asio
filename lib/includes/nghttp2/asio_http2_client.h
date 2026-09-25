@@ -201,6 +201,34 @@ public:
           boost::asio::ssl::context &tls_context, const std::string &host,
           const std::string &service, std::chrono::nanoseconds connect_timeout);
 
+  // Same six constructors as above, but taking an executor directly instead
+  // of an io_context. This is what makes it safe to run a session on an
+  // io_context shared with other work across multiple threads: pass a
+  // strand (or any other executor that serializes the handlers posted
+  // through it), and every socket, timer, and resolver this session owns,
+  // and every handler this session ever dispatches, uses that executor —
+  // nghttp2 sessions are not thread-safe against concurrent entry. The
+  // io_context-based constructors above are convenience wrappers that pass
+  // io_context.get_executor(), which does not serialize anything beyond
+  // what the io_context itself already does.
+  session(const boost::asio::any_io_executor &ex, const std::string &host,
+          const std::string &service);
+  session(const boost::asio::any_io_executor &ex,
+          const boost::asio::ip::tcp::endpoint &local_endpoint,
+          const std::string &host, const std::string &service);
+  session(const boost::asio::any_io_executor &ex, const std::string &host,
+          const std::string &service, std::chrono::nanoseconds connect_timeout);
+  session(const boost::asio::any_io_executor &ex,
+          const boost::asio::ip::tcp::endpoint &local_endpoint,
+          const std::string &host, const std::string &service,
+          std::chrono::nanoseconds connect_timeout);
+  session(const boost::asio::any_io_executor &ex,
+          boost::asio::ssl::context &tls_context, const std::string &host,
+          const std::string &service);
+  session(const boost::asio::any_io_executor &ex,
+          boost::asio::ssl::context &tls_context, const std::string &host,
+          const std::string &service, std::chrono::nanoseconds connect_timeout);
+
   ~session();
 
   session(session &&other) noexcept;

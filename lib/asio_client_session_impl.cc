@@ -38,15 +38,15 @@ namespace nghttp2 {
 namespace asio_http2 {
 namespace client {
 
-session_impl::session_impl(boost::asio::io_context &io_context,
+session_impl::session_impl(const boost::asio::any_io_executor &ex,
                            std::chrono::nanoseconds connect_timeout)
     : wblen_(0),
-      io_context_(io_context),
-      resolver_(io_context),
-      deadline_(io_context),
+      executor_(ex),
+      resolver_(ex),
+      deadline_(ex),
       connect_timeout_(connect_timeout),
       read_timeout_(std::chrono::seconds(60)),
-      ping_(io_context),
+      ping_(ex),
       session_(nullptr),
       data_pending_(nullptr),
       data_pendinglen_(0),
@@ -623,7 +623,13 @@ void session_impl::shutdown() {
   signal_write();
 }
 
-boost::asio::io_context &session_impl::io_context() { return io_context_; }
+boost::asio::io_context &session_impl::io_context() {
+  return static_cast<boost::asio::io_context &>(executor_.context());
+}
+
+const boost::asio::any_io_executor &session_impl::executor() const {
+  return executor_;
+}
 
 void session_impl::signal_write() {
   if (!inside_callback_) {

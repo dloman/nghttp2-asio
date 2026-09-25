@@ -30,10 +30,10 @@ namespace asio_http2 {
 namespace client {
 
 session_tls_impl::session_tls_impl(
-    boost::asio::io_context &io_context, boost::asio::ssl::context &tls_ctx,
+    const boost::asio::any_io_executor &ex, boost::asio::ssl::context &tls_ctx,
     const std::string &host, const std::string &service,
     std::chrono::nanoseconds connect_timeout)
-    : session_impl(io_context, connect_timeout), socket_(io_context, tls_ctx) {
+    : session_impl(ex, connect_timeout), socket_(ex, tls_ctx) {
   socket_.set_verify_callback(boost::asio::ssl::host_name_verification(host));
   auto ssl = socket_.native_handle();
   if (!util::numeric_host(host.c_str())) {

@@ -39,10 +39,10 @@ using boost::asio::ip::tcp;
 
 class session_tcp_impl : public session_impl {
 public:
-  session_tcp_impl(boost::asio::io_context &io_context,
+  session_tcp_impl(const boost::asio::any_io_executor &ex,
                    const std::string &host, const std::string &service,
                    std::chrono::nanoseconds connect_timeout);
-  session_tcp_impl(boost::asio::io_context &io_context,
+  session_tcp_impl(const boost::asio::any_io_executor &ex,
                    const boost::asio::ip::tcp::endpoint &local_endpoint,
                    const std::string &host, const std::string &service,
                    std::chrono::nanoseconds connect_timeout);
