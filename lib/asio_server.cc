@@ -170,8 +170,18 @@ void server::start_accept(boost::asio::ssl::context &tls_context,
     return;
   }
 
+  // Each connection gets its own strand over get_io_context()'s executor.
+  // With an external, caller-supplied io_context (the common rpcpio-style
+  // case), that io_context may be driven by more than one thread; without
+  // this, this connection's own socket read/write/handshake completions --
+  // and every handler downstream of them -- could land on two different
+  // threads at once, and nghttp2 sessions are not thread-safe against that.
+  // Different connections still get different strands, so they still run
+  // fully in parallel across those threads.
+  boost::asio::strand<boost::asio::any_io_executor> conn_strand(
+      get_io_context().get_executor());
   auto new_connection = std::make_shared<connection<ssl_socket>>(
-      mux, tls_handshake_timeout_, read_timeout_, get_io_context(),
+      mux, tls_handshake_timeout_, read_timeout_, conn_strand,
       tls_context);
 
   track_connection([w = std::weak_ptr<connection<ssl_socket>>(new_connection)]() {
@@ -215,8 +225,12 @@ void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
     return;
   }
 
+  // See the TLS overload above for why this is a per-connection strand
+  // rather than get_io_context() directly.
+  boost::asio::strand<boost::asio::any_io_executor> conn_strand(
+      get_io_context().get_executor());
   auto new_connection = std::make_shared<connection<tcp::socket>>(
-      mux, tls_handshake_timeout_, read_timeout_, get_io_context());
+      mux, tls_handshake_timeout_, read_timeout_, conn_strand);
 
   track_connection([w = std::weak_ptr<connection<tcp::socket>>(new_connection)]() {
     if (auto c = w.lock()) {

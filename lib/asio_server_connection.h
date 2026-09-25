@@ -79,8 +79,7 @@ public:
     boost::system::error_code ec;
 
     handler_ = std::make_shared<http2_handler>(
-        static_cast<boost::asio::io_context &>(
-            socket_.lowest_layer().get_executor().context()),
+        socket_.lowest_layer().get_executor(),
         socket_.lowest_layer().remote_endpoint(ec),
         [this]() { do_write(); }, mux_);
     if (handler_->start() != 0) {
