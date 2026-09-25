@@ -184,10 +184,18 @@ void server::start_accept(boost::asio::ssl::context &tls_context,
       mux, tls_handshake_timeout_, read_timeout_, conn_strand,
       tls_context);
 
-  track_connection([w = std::weak_ptr<connection<ssl_socket>>(new_connection)]() {
-    if (auto c = w.lock()) {
-      c->stop();
-    }
+  // close_connections() (called from server::stop(), i.e. from whatever
+  // thread calls Shutdown()) runs these closers directly; that thread is not
+  // necessarily one that this connection's own strand ever runs on. Route
+  // the actual stop() through conn_strand so it can never race this
+  // connection's own in-flight read/write/handshake handlers.
+  track_connection([w = std::weak_ptr<connection<ssl_socket>>(new_connection),
+                    conn_strand]() {
+    boost::asio::dispatch(conn_strand, [w]() {
+      if (auto c = w.lock()) {
+        c->stop();
+      }
+    });
   });
 
   acceptor.async_accept(
@@ -232,10 +240,14 @@ void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
   auto new_connection = std::make_shared<connection<tcp::socket>>(
       mux, tls_handshake_timeout_, read_timeout_, conn_strand);
 
-  track_connection([w = std::weak_ptr<connection<tcp::socket>>(new_connection)]() {
-    if (auto c = w.lock()) {
-      c->stop();
-    }
+  // See the TLS overload above for why this dispatches through conn_strand.
+  track_connection([w = std::weak_ptr<connection<tcp::socket>>(new_connection),
+                    conn_strand]() {
+    boost::asio::dispatch(conn_strand, [w]() {
+      if (auto c = w.lock()) {
+        c->stop();
+      }
+    });
   });
 
   acceptor.async_accept(
