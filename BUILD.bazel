@@ -30,7 +30,6 @@ cc_library(
         "lib/*.h",
     ], exclude = ["lib/timegm.h"]),
     hdrs = glob(["lib/includes/**/*.h"]),
-    copts = ["-std=c++14"],
     local_defines = [
         "HAVE_ARPA_INET_H",
         "HAVE_FCNTL_H",
