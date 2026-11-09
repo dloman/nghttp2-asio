@@ -38,6 +38,9 @@ namespace server {
 
 http2::http2() : impl_(std::make_unique<http2_impl>()) {}
 
+http2::http2(boost::asio::io_context &io_context)
+    : impl_(std::make_unique<http2_impl>(io_context)) {}
+
 http2::~http2() {}
 
 http2::http2(http2 &&other) noexcept : impl_(std::move(other.impl_)) {}
@@ -80,6 +83,8 @@ void http2::read_timeout(std::chrono::nanoseconds t) {
 bool http2::handle(std::string pattern, request_cb cb) {
   return impl_->handle(std::move(pattern), std::move(cb));
 }
+
+void http2::stop_listening() { impl_->stop_listening(); }
 
 void http2::stop() { impl_->stop(); }
 

@@ -52,7 +52,14 @@ using connection_write = std::function<void(void)>;
 
 class http2_handler : public std::enable_shared_from_this<http2_handler> {
 public:
-  http2_handler(boost::asio::io_context &io_context,
+  // executor is the per-connection executor (a strand, when the caller runs
+  // more than one thread on the underlying io_context) that this handler's
+  // own deferred work -- currently just the initiate_write() post in
+  // signal_write() -- is dispatched through, matching the executor the
+  // connection's socket was already constructed with. Without this, that
+  // post() would run on the bare io_context and could race the same
+  // connection's read/write handlers on another thread.
+  http2_handler(const boost::asio::any_io_executor &executor,
                 boost::asio::ip::tcp::endpoint ep, connection_write writefun,
                 serve_mux &mux);
 
@@ -88,8 +95,13 @@ public:
   void signal_write();
 
   boost::asio::io_context &io_context();
+  const boost::asio::any_io_executor &get_executor() const;
 
   const boost::asio::ip::tcp::endpoint &remote_endpoint();
+
+  // Takes ownership of one reference to |cert|, which may be nullptr.
+  void peer_certificate(X509 *cert);
+  X509 *peer_certificate() const;
 
   const std::string &http_date();
 
@@ -153,8 +165,9 @@ private:
   std::map<int32_t, std::shared_ptr<stream>> streams_;
   connection_write writefun_;
   serve_mux &mux_;
-  boost::asio::io_context &io_context_;
+  boost::asio::any_io_executor executor_;
   boost::asio::ip::tcp::endpoint remote_ep_;
+  X509 *peer_cert_;
   nghttp2_session *session_;
   const uint8_t *buf_;
   std::size_t buflen_;

@@ -47,9 +47,46 @@ namespace server {
 server::server(std::size_t io_context_pool_size,
                std::chrono::nanoseconds tls_handshake_timeout,
                std::chrono::nanoseconds read_timeout)
-    : io_context_pool_(io_context_pool_size),
+    : uses_external_io_context_(false),
+      io_context_pool_(std::make_unique<io_service_pool>(io_context_pool_size)),
+      external_io_context_(nullptr),
       tls_handshake_timeout_(tls_handshake_timeout),
       read_timeout_(read_timeout) {}
+
+server::server(boost::asio::io_context &io_context,
+               std::chrono::nanoseconds tls_handshake_timeout,
+               std::chrono::nanoseconds read_timeout)
+    : uses_external_io_context_(true),
+      io_context_pool_(nullptr),
+      external_io_context_(&io_context),
+      tls_handshake_timeout_(tls_handshake_timeout),
+      read_timeout_(read_timeout) {
+  external_io_contexts_.push_back(
+      std::shared_ptr<boost::asio::io_context>(&io_context, [](auto *) {}));
+}
+
+boost::asio::io_context &server::get_io_context() {
+  if (uses_external_io_context_) {
+    return *external_io_context_;
+  }
+  return io_context_pool_->get_io_context();
+}
+
+void server::track_connection(std::function<void()> stop_fn) {
+  std::lock_guard<std::mutex> lock(connection_closers_mutex_);
+  connection_closers_.push_back(std::move(stop_fn));
+}
+
+void server::close_connections() {
+  std::vector<std::function<void()>> closers;
+  {
+    std::lock_guard<std::mutex> lock(connection_closers_mutex_);
+    closers.swap(connection_closers_);
+  }
+  for (auto &fn : closers) {
+    fn();
+  }
+}
 
 boost::system::error_code
 server::listen_and_serve(boost::system::error_code &ec,
@@ -70,7 +107,13 @@ server::listen_and_serve(boost::system::error_code &ec,
     }
   }
 
-  io_context_pool_.run(asynchronous);
+  if (uses_external_io_context_) {
+    if (!asynchronous) {
+      external_io_context_->run();
+    }
+  } else {
+    io_context_pool_->run(asynchronous);
+  }
 
   return ec;
 }
@@ -79,7 +122,7 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
                                                   const std::string &address,
                                                   const std::string &port,
                                                   int backlog) {
-  tcp::resolver resolver(io_context_pool_.get_io_context());
+  tcp::resolver resolver(get_io_context());
   auto results = resolver.resolve(address, port, ec);
   if (ec) {
     return ec;
@@ -87,7 +130,7 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
 
   for (const auto &result : results) {
     tcp::endpoint endpoint = result.endpoint();
-    auto acceptor = tcp::acceptor(io_context_pool_.get_io_context());
+    auto acceptor = tcp::acceptor(get_io_context());
 
     if (acceptor.open(endpoint.protocol(), ec)) {
       continue;
@@ -100,7 +143,8 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
     }
 
     if (acceptor.listen(
-            backlog == -1 ? boost::asio::socket_base::max_connections : backlog,
+            backlog == -1 ? boost::asio::socket_base::max_listen_connections
+                          : backlog,
             ec)) {
       continue;
     }
@@ -122,79 +166,172 @@ boost::system::error_code server::bind_and_listen(boost::system::error_code &ec,
 void server::start_accept(boost::asio::ssl::context &tls_context,
                           tcp::acceptor &acceptor, serve_mux &mux) {
 
+  {
+    std::lock_guard<std::mutex> lock(acceptors_mutex_);
+    if (!acceptor.is_open()) {
+      return;
+    }
+  }
+
+  // Each connection gets its own strand over get_io_context()'s executor.
+  // With an external, caller-supplied io_context (the common rpcpio-style
+  // case), that io_context may be driven by more than one thread; without
+  // this, this connection's own socket read/write/handshake completions --
+  // and every handler downstream of them -- could land on two different
+  // threads at once, and nghttp2 sessions are not thread-safe against that.
+  // Different connections still get different strands, so they still run
+  // fully in parallel across those threads.
+  boost::asio::strand<boost::asio::any_io_executor> conn_strand(
+      get_io_context().get_executor());
+  auto new_connection = std::make_shared<connection<ssl_socket>>(
+      mux, tls_handshake_timeout_, read_timeout_, conn_strand,
+      tls_context);
+
+  // close_connections() (called from server::stop(), i.e. from whatever
+  // thread calls Shutdown()) runs these closers directly; that thread is not
+  // necessarily one that this connection's own strand ever runs on. Route
+  // the actual stop() through conn_strand so it can never race this
+  // connection's own in-flight read/write/handshake handlers.
+  track_connection([w = std::weak_ptr<connection<ssl_socket>>(new_connection),
+                    conn_strand]() {
+    boost::asio::dispatch(conn_strand, [w]() {
+      if (auto c = w.lock()) {
+        c->stop();
+      }
+    });
+  });
+
+  // async_accept's completion handler is, by default, dispatched via the
+  // acceptor's own executor -- not conn_strand, even though the socket it
+  // operates on was constructed with conn_strand -- because it is the
+  // acceptor's operation, and there is exactly one acceptor shared by every
+  // connection. Touching the brand-new connection (set_option, starting the
+  // handshake) from there is exactly the kind of access this whole change
+  // is meant to confine, so bind_executor it onto conn_strand explicitly.
+  // The trailing start_accept() re-arm call is unrelated to this
+  // connection but harmless to also run on conn_strand once.
+  std::lock_guard<std::mutex> accept_lock(acceptors_mutex_);
   if (!acceptor.is_open()) {
     return;
   }
-
-  auto new_connection = std::make_shared<connection<ssl_socket>>(
-      mux, tls_handshake_timeout_, read_timeout_,
-      io_context_pool_.get_io_context(), tls_context);
-
   acceptor.async_accept(
       new_connection->socket().lowest_layer(),
-      [this, &tls_context, &acceptor, &mux,
-       new_connection](const boost::system::error_code &e) {
-        if (!e) {
-          new_connection->socket().lowest_layer().set_option(
-              tcp::no_delay(true));
-          new_connection->start_tls_handshake_deadline();
-          new_connection->socket().async_handshake(
-              boost::asio::ssl::stream_base::server,
-              [new_connection](const boost::system::error_code &e) {
-                if (e) {
-                  new_connection->stop();
-                  return;
-                }
+      boost::asio::bind_executor(
+          conn_strand,
+          [this, &tls_context, &acceptor, &mux,
+           new_connection](const boost::system::error_code &e) {
+            if (!e) {
+              boost::system::error_code option_ec;
+              new_connection->socket().lowest_layer().set_option(
+                  tcp::no_delay(true), option_ec);
+              if (option_ec) {
+                new_connection->stop();
+                start_accept(tls_context, acceptor, mux);
+                return;
+              }
+              new_connection->start_tls_handshake_deadline();
+              new_connection->socket().async_handshake(
+                  boost::asio::ssl::stream_base::server,
+                  [new_connection](const boost::system::error_code &e) {
+                    if (e) {
+                      new_connection->stop();
+                      return;
+                    }
 
-                if (!tls_h2_negotiated(new_connection->socket())) {
-                  new_connection->stop();
-                  return;
-                }
+                    if (!tls_h2_negotiated(new_connection->socket())) {
+                      new_connection->stop();
+                      return;
+                    }
 
-                new_connection->start();
-              });
-        }
+                    new_connection->start();
+                  });
+            }
 
-        start_accept(tls_context, acceptor, mux);
-      });
+            start_accept(tls_context, acceptor, mux);
+          }));
 }
 
 void server::start_accept(tcp::acceptor &acceptor, serve_mux &mux) {
 
+  {
+    std::lock_guard<std::mutex> lock(acceptors_mutex_);
+    if (!acceptor.is_open()) {
+      return;
+    }
+  }
+
+  // See the TLS overload above for why this is a per-connection strand
+  // rather than get_io_context() directly.
+  boost::asio::strand<boost::asio::any_io_executor> conn_strand(
+      get_io_context().get_executor());
+  auto new_connection = std::make_shared<connection<tcp::socket>>(
+      mux, tls_handshake_timeout_, read_timeout_, conn_strand);
+
+  // See the TLS overload above for why this dispatches through conn_strand.
+  track_connection([w = std::weak_ptr<connection<tcp::socket>>(new_connection),
+                    conn_strand]() {
+    boost::asio::dispatch(conn_strand, [w]() {
+      if (auto c = w.lock()) {
+        c->stop();
+      }
+    });
+  });
+
+  // See the TLS overload above for why this binds conn_strand explicitly.
+  std::lock_guard<std::mutex> accept_lock(acceptors_mutex_);
   if (!acceptor.is_open()) {
     return;
   }
-
-  auto new_connection = std::make_shared<connection<tcp::socket>>(
-      mux, tls_handshake_timeout_, read_timeout_,
-      io_context_pool_.get_io_context());
-
   acceptor.async_accept(
-      new_connection->socket(), [this, &acceptor, &mux, new_connection](
-                                    const boost::system::error_code &e) {
-        if (!e) {
-          new_connection->socket().set_option(tcp::no_delay(true));
-          new_connection->start_read_deadline();
-          new_connection->start();
-        }
-        if (acceptor.is_open()) {
-          start_accept(acceptor, mux);
-        }
-      });
+      new_connection->socket(),
+      boost::asio::bind_executor(
+          conn_strand,
+          [this, &acceptor, &mux,
+           new_connection](const boost::system::error_code &e) {
+            if (!e) {
+              boost::system::error_code option_ec;
+              new_connection->socket().set_option(tcp::no_delay(true),
+                                                  option_ec);
+              if (option_ec) {
+                new_connection->stop();
+                start_accept(acceptor, mux);
+                return;
+              }
+              new_connection->start_read_deadline();
+              new_connection->start();
+            }
+            start_accept(acceptor, mux);
+          }));
 }
 
-void server::stop() {
+void server::stop_listening() {
+  std::lock_guard<std::mutex> lock(acceptors_mutex_);
   for (auto &acceptor : acceptors_) {
     acceptor.close();
   }
-  io_context_pool_.stop();
 }
 
-void server::join() { io_context_pool_.join(); }
+void server::stop() {
+  stop_listening();
+  close_connections();
+  if (!uses_external_io_context_) {
+    io_context_pool_->stop();
+  }
+}
+
+void server::join() {
+  if (uses_external_io_context_) {
+    return;
+  }
+  io_context_pool_->join();
+}
 
 const std::vector<std::shared_ptr<boost::asio::io_context>> &
 server::io_contexts() const {
-  return io_context_pool_.io_contexts();
+  if (uses_external_io_context_) {
+    return external_io_contexts_;
+  }
+  return io_context_pool_->io_contexts();
 }
 
 const std::vector<int> server::ports() const {

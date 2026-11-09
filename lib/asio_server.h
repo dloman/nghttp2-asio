@@ -40,6 +40,8 @@
 #include "nghttp2_config.h"
 
 #include <chrono>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <memory>
@@ -69,12 +71,17 @@ public:
                   std::chrono::nanoseconds tls_handshake_timeout,
                   std::chrono::nanoseconds read_timeout);
 
+  explicit server(boost::asio::io_context &io_context,
+                  std::chrono::nanoseconds tls_handshake_timeout,
+                  std::chrono::nanoseconds read_timeout);
+
   boost::system::error_code
   listen_and_serve(boost::system::error_code &ec,
                    boost::asio::ssl::context *tls_context,
                    const std::string &address, const std::string &port,
                    int backlog, serve_mux &mux, bool asynchronous = false);
   void join();
+  void stop_listening();
   void stop();
 
   const std::vector<std::shared_ptr<boost::asio::io_context>> &
@@ -92,7 +99,21 @@ private:
                                             const std::string &port,
                                             int backlog);
 
-  io_service_pool io_context_pool_;
+  boost::asio::io_context &get_io_context();
+  void track_connection(std::function<void()> stop_fn);
+  void close_connections();
+
+  bool uses_external_io_context_;
+  std::unique_ptr<io_service_pool> io_context_pool_;
+  boost::asio::io_context *external_io_context_;
+  std::vector<std::shared_ptr<boost::asio::io_context>> external_io_contexts_;
+  std::mutex connection_closers_mutex_;
+  std::vector<std::function<void()>> connection_closers_;
+  // Serializes is_open(), async_accept() and close() on each acceptor. Accept
+  // completions re-arm from per-connection strands while stop_listening()
+  // runs on whichever thread calls stop(); an acceptor object is not safe to
+  // use from two threads at once.
+  std::mutex acceptors_mutex_;
   std::vector<tcp::acceptor> acceptors_;
   std::unique_ptr<boost::asio::ssl::context> ssl_ctx_;
 

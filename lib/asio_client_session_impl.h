@@ -44,7 +44,14 @@ using boost::asio::ip::tcp;
 
 class session_impl : public std::enable_shared_from_this<session_impl> {
 public:
-  session_impl(boost::asio::io_context &io_context,
+  // ex is the executor every socket, timer, and resolver this session owns
+  // is constructed with, and the only executor any of this session's
+  // internal handlers are ever dispatched through. Passing a strand (or any
+  // other serializing executor) here is what makes an rpcpio-style caller's
+  // multi-threaded io_context safe to run a session on: nghttp2 sessions
+  // are not thread-safe, so without this, two of the caller's io_context
+  // threads could enter the same session concurrently.
+  session_impl(const boost::asio::any_io_executor &ex,
                std::chrono::nanoseconds connect_timeout);
   virtual ~session_impl();
 
@@ -55,9 +62,12 @@ public:
 
   void on_connect(connect_cb cb);
   void on_error(error_cb cb);
+  void on_goaway(goaway_cb cb);
 
   const connect_cb &on_connect() const;
   const error_cb &on_error() const;
+  const goaway_cb &on_goaway() const;
+  void call_on_goaway(uint32_t error_code, int32_t last_stream_id);
 
   int write_trailer(stream &strm, header_map h);
 
@@ -86,6 +96,7 @@ public:
   void shutdown();
 
   boost::asio::io_context &io_context();
+  const boost::asio::any_io_executor &executor() const;
 
   void signal_write();
 
@@ -113,13 +124,14 @@ private:
   void start_ping();
   void handle_ping(const boost::system::error_code &ec);
 
-  boost::asio::io_context &io_context_;
+  boost::asio::any_io_executor executor_;
   tcp::resolver resolver_;
 
   std::map<int32_t, std::unique_ptr<stream>> streams_;
 
   connect_cb connect_cb_;
   error_cb error_cb_;
+  goaway_cb goaway_cb_;
 
   boost::asio::steady_timer deadline_;
   std::chrono::nanoseconds connect_timeout_;

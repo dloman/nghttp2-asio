@@ -41,7 +41,7 @@ using ssl_socket = boost::asio::ssl::stream<tcp::socket>;
 
 class session_tls_impl : public session_impl {
 public:
-  session_tls_impl(boost::asio::io_context &io_context,
+  session_tls_impl(const boost::asio::any_io_executor &ex,
                    boost::asio::ssl::context &tls_ctx, const std::string &host,
                    const std::string &service,
                    std::chrono::nanoseconds connect_timeout);

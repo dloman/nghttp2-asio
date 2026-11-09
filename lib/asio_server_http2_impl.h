@@ -44,6 +44,7 @@ class server;
 class http2_impl {
 public:
   http2_impl();
+  explicit http2_impl(boost::asio::io_context &io_context);
   boost::system::error_code listen_and_serve(
       boost::system::error_code &ec, boost::asio::ssl::context *tls_context,
       const std::string &address, const std::string &port, bool asynchronous);
@@ -52,6 +53,7 @@ public:
   void tls_handshake_timeout(std::chrono::nanoseconds t);
   void read_timeout(std::chrono::nanoseconds t);
   bool handle(std::string pattern, request_cb cb);
+  void stop_listening();
   void stop();
   void join();
   const std::vector<std::shared_ptr<boost::asio::io_context>> &
@@ -60,6 +62,7 @@ public:
 
 private:
   std::unique_ptr<server> server_;
+  boost::asio::io_context *external_io_context_;
   std::size_t num_threads_;
   int backlog_;
   serve_mux mux_;

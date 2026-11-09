@@ -64,6 +64,15 @@ public:
   // Returns the remote endpoint of the request
   const boost::asio::ip::tcp::endpoint &remote_endpoint() const;
 
+  // Returns the executor that serializes this connection's operations.
+  boost::asio::any_io_executor get_executor() const;
+
+  // Returns the client certificate of this request's connection, or nullptr
+  // for cleartext connections and for TLS clients that sent no certificate
+  // or one that failed verification.  The connection owns the certificate;
+  // it is valid while the request is.  X509_up_ref it to keep it longer.
+  X509 *tls_peer_certificate() const;
+
 private:
   std::unique_ptr<request_impl> impl_;
 };
@@ -135,6 +144,7 @@ class http2_impl;
 class http2 {
 public:
   http2();
+  explicit http2(boost::asio::io_context &io_context);
   ~http2();
 
   http2(http2 &&other) noexcept;
@@ -183,7 +193,10 @@ public:
   // Accepts any std::chrono duration (e.g., std::chrono::seconds(30)).
   void read_timeout(std::chrono::nanoseconds t);
 
-  // Gracefully stop http2 server
+  // Stop accepting new connections. Existing connections remain open.
+  void stop_listening();
+
+  // Stop accepting and close existing connections.
   void stop();
 
   // Join on http2 server and wait for it to fully stop
